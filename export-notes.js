@@ -1,8 +1,9 @@
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-const DATA_DIR = resolve(process.env.WEREAD_DATA_DIR || "/Users/lujun/Documents/阅读相关/微信读书数据");
-const EXPORT_DIR = resolve(process.env.WEREAD_EXPORT_DIR || "/Users/lujun/Documents/阅读相关/微信读书笔记");
+const ROOT = new URL(".", import.meta.url).pathname;
+const DATA_DIR = resolve(process.env.WEREAD_DATA_DIR || join(ROOT, "data"));
+const EXPORT_DIR = resolve(process.env.WEREAD_EXPORT_DIR || join(ROOT, "exports"));
 function safeName(value) { return String(value || "未命名").replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, " ").trim().slice(0, 80) || "未命名"; }
 function safeId(value) { return String(value || "unknown").replace(/[^a-zA-Z0-9_-]/g, "_"); }
 function ymd(ts) { if (!ts) return "未记录"; const d = new Date(Number(ts) * 1000); return Number.isNaN(d.getTime()) ? "未记录" : d.toISOString().slice(0, 10); }

@@ -61,13 +61,13 @@ http://127.0.0.1:5177
 默认数据目录：
 
 ```text
-/Users/lujun/Documents/阅读相关/微信读书数据
+./data
 ```
 
 默认笔记导出目录：
 
 ```text
-/Users/lujun/Documents/阅读相关/微信读书笔记
+./exports
 ```
 
 可以用环境变量修改：
