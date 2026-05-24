@@ -21,6 +21,9 @@ const metaText = $("#metaText");
 const bookList = $("#bookList");
 const receipt = $("#receipt");
 const filterInput = $("#filter");
+const selectAllBooks = $("#selectAllBooks");
+const bulkDocumentButton = $("#bulkDocument");
+const bulkPublicationButton = $("#bulkPublication");
 const monthTime = $("#monthTime");
 const monthDays = $("#monthDays");
 const yearTime = $("#yearTime");
@@ -39,6 +42,7 @@ const prevMonthButton = $("#prevMonth");
 const nextMonthButton = $("#nextMonth");
 let books = [];
 let selectedBook = null;
+let checkedBookIds = new Set();
 let notebookMap = new Map();
 let monthStats = null;
 let calendarState = null;
@@ -59,7 +63,20 @@ async function weread(body) {
 }
 function formatDate(value) { if (!value) return "未记录"; const d = new Date(Number(value) * 1000); return Number.isNaN(d.getTime()) ? "未记录" : d.toISOString().slice(0, 10); }
 function formatDuration(seconds, compact = false) { const total = Number(seconds || 0); const h = Math.floor(total / 3600); const m = Math.floor((total % 3600) / 60); return compact ? h + "h " + String(m).padStart(2,"0") + "m" : h + "小时" + String(m).padStart(2,"0") + "分"; }
-function readDaysOf(book) { return Math.max(0, Math.ceil(Number(book.progress?.book?.recordReadingTime || 0) / 86400)); }
+function readingSecondsOf(book) { const progress = book?.progress?.book || {}; return Number(progress.recordReadingTime || progress.readingTime || progress.ttsTime || 0); }
+function localDayStart(ts) { const d = new Date(Number(ts) * 1000); return Number.isNaN(d.getTime()) ? 0 : new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); }
+function readDaysOf(book) {
+  if (Number(book?.readDays)) return Number(book.readDays);
+  const seconds = readingSecondsOf(book);
+  if (seconds <= 0 && progressOf(book) <= 0) return 0;
+  const shelf = shelfOf(book);
+  const first = Number(book?.progress?.book?.startReadingTime || shelf.updateTime || 0);
+  const last = lastReadOf(book);
+  const startDay = localDayStart(first);
+  const endDay = localDayStart(last);
+  if (startDay && endDay && endDay >= startDay) return Math.max(1, Math.round((endDay - startDay) / 86400000) + 1);
+  return 1;
+}
 function shortCategory(value) { const text = String(value || "未分类").replace(/[\s·•]+/g, "-"); return text.length > 12 ? text.slice(0, 12) + "…" : text; }
 function progressOf(book) { return Number((book.progress && book.progress.book && book.progress.book.progress) || book.readingProgress || 0); }
 function shelfOf(book) { return book?.shelf || book || {}; }
@@ -181,6 +198,30 @@ async function syncSelectedBook() {
   } finally {
     syncBookButton.disabled = !selectedBook;
     lookupIsbnButton.disabled = !selectedBook || classOf(selectedBook) === "document";
+  }
+}
+
+async function bulkSetBookClass(bookClass) {
+  const bookIds = [...checkedBookIds];
+  if (!bookIds.length) { setStatus("先勾选要修改的书。", "error"); return; }
+  bulkDocumentButton.disabled = true;
+  bulkPublicationButton.disabled = true;
+  setStatus("正在批量修改...");
+  try {
+    const response = await fetch("/api/book-class-batch", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({bookIds, bookClass})});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "批量修改失败");
+    for (const book of books) if (bookIds.includes(String(book.bookId))) book.bookClass = data.bookClass;
+    if (selectedBook && bookIds.includes(String(selectedBook.bookId))) selectedBook.bookClass = data.bookClass;
+    checkedBookIds.clear();
+    renderList();
+    renderReceipt();
+    setStatus("已修改 " + data.updated + " 本。");
+  } catch (error) {
+    setStatus(error.message, "error");
+  } finally {
+    bulkDocumentButton.disabled = false;
+    bulkPublicationButton.disabled = false;
   }
 }
 
@@ -367,8 +408,10 @@ function proxiedImage(url) { return "/api/image?url=" + encodeURIComponent(url |
 function renderList() {
   const keyword = filterInput.value.trim().toLowerCase();
   const visible = books.filter(book => (titleOf(book) + " " + authorOf(book)).toLowerCase().includes(keyword));
+  selectAllBooks.checked = visible.length > 0 && visible.every(book => checkedBookIds.has(String(book.bookId)));
   bookList.replaceChildren(...visible.map(book => {
     const row = document.createElement("button"); row.type = "button"; row.className = "book-row" + (selectedBook && selectedBook.bookId === book.bookId ? " active" : ""); row.addEventListener("click", () => selectBook(book.bookId));
+    const check = document.createElement("input"); check.type = "checkbox"; check.className = "book-check"; check.checked = checkedBookIds.has(String(book.bookId)); check.addEventListener("click", event => event.stopPropagation()); check.addEventListener("change", () => { if (check.checked) checkedBookIds.add(String(book.bookId)); else checkedBookIds.delete(String(book.bookId)); renderList(); });
     const img = document.createElement("img"); img.alt = titleOf(book); img.src = proxiedImage(coverOf(book));
     const info = document.createElement("div");
     const title = document.createElement("div"); title.className = "book-title"; title.textContent = titleOf(book);
@@ -376,7 +419,7 @@ function renderList() {
     const date = document.createElement("div"); date.className = "book-date"; date.textContent = "已读 " + readDaysOf(book) + " 天";
     info.append(title, author, date);
     const progress = document.createElement("div"); progress.className = "book-progress"; progress.textContent = progressOf(book) + "%";
-    row.append(img, info, progress); return row;
+    row.append(check, img, info, progress); return row;
   }));
 }
 function selectBook(bookId) { selectedBook = books.find(book => book.bookId === bookId) || null; if (selectedBook) bookClassSelect.value = classOf(selectedBook); renderList(); renderReceipt(); exportButton.disabled = !selectedBook; syncBookButton.disabled = !selectedBook; lookupIsbnButton.disabled = !selectedBook || classOf(selectedBook) === "document"; }
@@ -439,7 +482,7 @@ function starText(rating) {
 }
 function renderReceipt() {
   if (!selectedBook) { receipt.className = "receipt empty"; receipt.innerHTML = '<div class="empty-state">同步后选择一本书</div>'; return; }
-  const p = progressOf(selectedBook); const seconds = selectedBook.progress?.book?.recordReadingTime || 0; const recent = lastReadOf(selectedBook); const state = statusOf(selectedBook); const active = state === "在读" ? 0 : state === "搁置" ? 1 : 2; const note = notebookMap.get(selectedBook.bookId) || selectedBook.notebook; const noteCount = note ? totalNotes(note) : 0;
+  const p = progressOf(selectedBook); const seconds = readingSecondsOf(selectedBook); const recent = lastReadOf(selectedBook); const state = statusOf(selectedBook); const active = state === "在读" ? 0 : state === "搁置" ? 1 : 2; const note = notebookMap.get(selectedBook.bookId) || selectedBook.notebook; const noteCount = note ? totalNotes(note) : 0;
   const tabs = ["在读", "搁置", "读完"].map((label, i) => '<span class="' + (i === active ? 'active' : '') + '">' + label + '</span>').join("");
   receipt.className = "receipt";
   receipt.innerHTML = '<div class="ticket-block"></div><div class="ticket-tab"></div><div class="hatch left"></div><div class="hatch right"></div><div class="ticket-top">WECHAT READING RECEIPT</div><div class="cover-wrap"><img alt="' + escapeHtml(titleOf(selectedBook)) + '" src="' + proxiedImage(coverOf(selectedBook)) + '"></div><h2>' + escapeHtml(titleOf(selectedBook)) + '</h2><div class="author">' + escapeHtml(authorOf(selectedBook)) + '</div><div class="dash"></div><div class="stats"><div><div class="stat-label">进度</div><div class="stat-value">' + p + '%</div></div><div><div class="stat-label">时长</div><div class="stat-value">' + formatDuration(seconds) + '</div></div><div><div class="stat-label">已读天数</div><div class="stat-value">' + readDaysOf(selectedBook) + '天</div></div></div><div class="mini-stats"><div><span>笔记</span><strong>' + noteCount + '</strong></div><div><span>分类</span><strong>' + escapeHtml(shortCategory(categoryOf(selectedBook))) + '</strong></div></div><div class="state-tabs">' + tabs + '</div><div class="dash"></div><div class="barcode">' + barcodeBars(selectedBook) + '</div><div class="stars">' + starText(currentRating) + '</div><div class="receipt-date">日期：' + new Date().toISOString().slice(0,10) + '</div>';
@@ -476,7 +519,7 @@ async function exportSelected() {
     canvas.height = 2532;
     const ctx = canvas.getContext("2d");
     const p = progressOf(selectedBook);
-    const seconds = selectedBook.progress?.book?.recordReadingTime || 0;
+    const seconds = readingSecondsOf(selectedBook);
     const recent = lastReadOf(selectedBook);
     const note = notebookMap.get(selectedBook.bookId) || selectedBook.notebook;
     const noteCount = note ? totalNotes(note) : 0;
@@ -602,5 +645,16 @@ exportNotesButton.addEventListener("click", exportMarkdownNotes);
 loadShelfButton.addEventListener("click", loadShelf); exportButton.addEventListener("click", exportSelected); filterInput.addEventListener("input", renderList);
 prevMonthButton.addEventListener("click", () => shiftCalendarMonth(-1));
 nextMonthButton.addEventListener("click", () => shiftCalendarMonth(1));
+selectAllBooks.addEventListener("change", () => {
+  const keyword = filterInput.value.trim().toLowerCase();
+  const visible = books.filter(book => (titleOf(book) + " " + authorOf(book)).toLowerCase().includes(keyword));
+  for (const book of visible) {
+    if (selectAllBooks.checked) checkedBookIds.add(String(book.bookId));
+    else checkedBookIds.delete(String(book.bookId));
+  }
+  renderList();
+});
+bulkDocumentButton.addEventListener("click", () => bulkSetBookClass("document"));
+bulkPublicationButton.addEventListener("click", () => bulkSetBookClass("publication"));
 
 loadLocalDataOnOpen();

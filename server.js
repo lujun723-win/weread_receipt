@@ -497,6 +497,28 @@ async function updateBookClass(req, res) {
   json(res, 200, {bookId, bookClass});
 }
 
+async function updateBookClassBatch(req, res) {
+  let p; try { p = JSON.parse(await body(req)); } catch { json(res, 400, {error:"请求体不是有效 JSON。"}); return; }
+  const bookIds = Array.isArray(p.bookIds) ? p.bookIds.map(String).filter(Boolean) : [];
+  const bookClass = p.bookClass === "document" ? "document" : "publication";
+  if (!bookIds.length) { json(res, 400, {error:"缺少 bookIds。"}); return; }
+  let updated = 0;
+  for (const bookId of bookIds) {
+    const file = join(DATA_DIR, "books", safeId(bookId) + ".json");
+    const record = await readJson(file, null);
+    if (!record) continue;
+    record.bookClass = bookClass;
+    record.updatedAt = new Date().toISOString();
+    await writeJson(file, record);
+    updated += 1;
+  }
+  const index = await readJson(join(DATA_DIR, "index.json"), {books:[]});
+  const idSet = new Set(bookIds);
+  for (const item of index.books || []) if (idSet.has(String(item.bookId))) item.bookClass = bookClass;
+  await writeJson(join(DATA_DIR, "index.json"), index);
+  json(res, 200, {bookIds, bookClass, updated});
+}
+
 async function recheckIsbn(req, res) {
   let p; try { p = JSON.parse(await body(req)); } catch { json(res, 400, {error:"请求体不是有效 JSON。"}); return; }
   const bookId = String(p.bookId || "");
@@ -557,6 +579,7 @@ createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/calendar-month") return calendarMonth(req, res);
     if (req.method === "POST" && url.pathname === "/api/sync-book") return syncBook(req, res);
     if (req.method === "POST" && url.pathname === "/api/book-class") return updateBookClass(req, res);
+    if (req.method === "POST" && url.pathname === "/api/book-class-batch") return updateBookClassBatch(req, res);
     if (req.method === "POST" && url.pathname === "/api/recheck-isbn") return recheckIsbn(req, res);
     if (req.method === "POST" && url.pathname === "/api/sync-local-stream") return syncLocalStream(req, res);
     if (req.method === "POST" && url.pathname === "/api/sync-local") return syncLocal(req, res);
