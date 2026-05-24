@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>微信读书阅读面板</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main class="shell">
+  <section class="topbar">
+    <div class="brand">
+      <div class="mark">阅</div>
+      <div>
+        <h1>微信读书阅读面板</h1>
+        <p>书架、进度、统计和笔记，一页生成可分享的阅读小票。</p><time id="todayStamp" class="today-stamp"></time>
+      </div>
+    </div>
+    <div class="controls">
+      <label class="field"><span>API Key</span><input id="apiKey" type="password" autocomplete="off" placeholder="wrk-xxxxxxxx"></label>
+      <a class="button" href="https://weread.qq.com/r/weread-skills" target="_blank" rel="noreferrer">获取 Key</a>
+      <button id="loadShelf" class="button primary" type="button">同步数据</button>
+      <label class="rating-field"><span>星级</span><input id="ratingInput" type="range" min="0" max="5" step="0.5" value="4"><strong id="ratingValue">4.0</strong></label><label class="class-field"><span>类型</span><select id="bookClassSelect"><option value="publication">出版物</option><option value="document">个人文档</option></select></label><button id="lookupIsbn" class="button" type="button" disabled>补 ISBN</button><button id="exportPng" class="button" type="button" disabled>下载票据</button>
+      <button id="exportNotes" class="button" type="button">导出笔记</button>
+    </div>
+  </section>
+
+  <section class="status-line"><span id="statusText">等待 API Key。</span><span id="metaText"></span></section>
+  <section id="syncProgress" class="sync-progress" hidden>
+    <div class="sync-progress-head"><span id="syncStage">准备同步</span><strong id="syncPercent">0%</strong></div>
+    <div class="progress-track"><div id="syncBar" class="progress-fill"></div></div>
+    <div id="syncDetail" class="sync-detail"></div>
+  </section>
+  <section id="exportResult" class="export-result" hidden></section>
+
+  <section class="insights">
+    <article class="hero-stat"><span>本月阅读</span><strong id="monthTime">--</strong><em id="monthDays">--</em></article>
+    <article><span>今年阅读</span><strong id="yearTime">--</strong><em id="yearDays">--</em></article>
+    <article><span>书架条目</span><strong id="shelfTotal">--</strong><em id="shelfMix">--</em></article>
+    <article><span>笔记总量</span><strong id="noteTotal">--</strong><em id="noteBooks">--</em></article>
+  </section>
+
+  <section class="panels">
+    <article class="panel rank-panel">
+      <div class="panel-head"><h2>读得最久</h2><span id="rankScope">本月</span></div>
+      <div id="longestList" class="rank-list empty-text">同步后显示</div>
+    </article>
+    <article class="panel">
+      <div class="panel-head"><h2>阅读偏好</h2><span id="preferWord">--</span></div>
+      <div id="categoryBars" class="category-bars empty-text">同步后显示</div>
+    </article>
+    <article class="panel notes-panel">
+      <div class="panel-head"><h2>笔记最多</h2><span id="notesScope">全部</span></div>
+      <div id="notesList" class="rank-list empty-text">同步后显示</div>
+    </article>
+  </section>
+
+  <section class="workspace">
+    <aside class="library">
+      <div class="library-head">
+        <div><h2>阅读顺序</h2><p>按最近阅读时间从新到旧</p></div>
+        <input id="filter" type="search" placeholder="搜索书名或作者">
+      </div>
+      <div id="bookList" class="book-list"></div>
+    </aside>
+    <section class="preview-area"><div id="receipt" class="receipt empty"><div class="empty-state">同步后选择一本书</div></div></section>
+  </section>
+</main>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

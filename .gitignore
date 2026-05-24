@@ -1,0 +1,14 @@
+node_modules/
+.DS_Store
+.env
+.env.*
+
+# Local WeRead data and exported notes should stay private.
+微信读书数据/
+微信读书笔记/
+data/
+exports/
+
+# Generated receipt images.
+*-阅读小票.png
+*.log
