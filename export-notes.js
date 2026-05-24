@@ -1,7 +1,8 @@
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-const ROOT = new URL(".", import.meta.url).pathname;
+import { fileURLToPath } from "node:url";
+const ROOT = fileURLToPath(new URL(".", import.meta.url));
 const DATA_DIR = resolve(process.env.WEREAD_DATA_DIR || join(ROOT, "data"));
 const EXPORT_DIR = resolve(process.env.WEREAD_EXPORT_DIR || join(ROOT, "exports"));
 function safeName(value) { return String(value || "未命名").replace(/[\\/:*?"<>|]/g, "_").replace(/\s+/g, " ").trim().slice(0, 80) || "未命名"; }
