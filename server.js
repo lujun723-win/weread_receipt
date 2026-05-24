@@ -175,9 +175,39 @@ function calendarDateKey(ts) {
   const date = new Date(Number(ts) * 1000);
   return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
 }
+function monthKeyFromBaseTime(baseTime) {
+  const date = new Date(Number(baseTime) * 1000);
+  return Number.isNaN(date.getTime()) ? "unknown" : date.toISOString().slice(0, 7);
+}
+function compactBookInfo(book) {
+  if (!book || typeof book !== "object" || !book.cover || !(book.bookId || book.title || book.name)) return null;
+  return {bookId:book.bookId || "", title:book.title || book.name || "未命名", author:book.author || book.authorName || "", cover:book.cover || ""};
+}
+function findCoveredBook(value, seen = new Set()) {
+  if (!value || typeof value !== "object" || seen.has(value)) return null;
+  seen.add(value);
+  const direct = compactBookInfo(value);
+  if (direct) return direct;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findCoveredBook(item, seen);
+      if (found) return found;
+    }
+    return null;
+  }
+  for (const key of ["book", "bookInfo", "albumInfo", "bookDetail"]) {
+    const found = findCoveredBook(value[key], seen);
+    if (found) return found;
+  }
+  for (const item of Object.values(value)) {
+    const found = findCoveredBook(item, seen);
+    if (found) return found;
+  }
+  return null;
+}
 function topBookFromReadData(data) {
   const item = Array.isArray(data?.readLongest) ? data.readLongest.find(entry => entry?.book || entry?.albumInfo) : null;
-  return item?.book || item?.albumInfo || null;
+  return compactBookInfo(item?.book || item?.albumInfo) || findCoveredBook(data);
 }
 async function enrichMonthlyCalendar(apiKey, monthly) {
   const readTimes = monthly?.readTimes || {};
@@ -189,7 +219,7 @@ async function enrichMonthlyCalendar(apiKey, monthly) {
     if (day.readTime > 0) {
       const daily = await callWeread(apiKey, {api_name:"/readdata/detail", mode:"daily", baseTime:Number(ts)}).catch(error => ({calendarError:error.message}));
       const book = topBookFromReadData(daily);
-      if (book) day.book = {bookId:book.bookId, title:book.title || book.name || "未命名", author:book.author || book.authorName || "", cover:book.cover || ""};
+      if (book) day.book = book;
       if (daily.calendarError) day.error = daily.calendarError;
     }
     days.push(day);
@@ -384,6 +414,20 @@ async function loadLocalData(req, res) {
     json(res, 200, {empty:false,dataDir:DATA_DIR,shelf:await readJson(join(DATA_DIR,"shelf.json"),{books:[],albums:[]}),monthly:await readJson(join(DATA_DIR,"stats","monthly.json"),{}),annually:await readJson(join(DATA_DIR,"stats","annually.json"),{}),notebooks:await readJson(join(DATA_DIR,"notebooks.json"),{books:[]}),books,sync:{updated:0,reused:books.length,isbnEnriched:0,isbnMissing:0,dataDir:DATA_DIR}});
   } catch (error) { json(res, 502, {error:error.message}); }
 }
+async function calendarMonth(req, res) {
+  let p; try { p = JSON.parse(await body(req)); } catch { json(res, 400, {error:"请求体不是有效 JSON。"}); return; }
+  const apiKey = p.apiKey || process.env.WEREAD_API_KEY;
+  const baseTime = Number(p.baseTime || 0);
+  if (!apiKey) { json(res, 400, {error:"缺少 API Key。"}); return; }
+  if (!baseTime) { json(res, 400, {error:"缺少月份。"}); return; }
+  try {
+    await ensureStore();
+    const monthly = await callWeread(apiKey, {api_name:"/readdata/detail", mode:"monthly", baseTime});
+    const enriched = await enrichMonthlyCalendar(apiKey, monthly);
+    await writeJson(join(DATA_DIR, "stats", "monthly-" + monthKeyFromBaseTime(baseTime) + ".json"), enriched);
+    json(res, 200, enriched);
+  } catch (error) { json(res, 502, {error:error.message}); }
+}
 async function syncBook(req, res) {
   let p; try { p = JSON.parse(await body(req)); } catch { json(res, 400, {error:"请求体不是有效 JSON。"}); return; }
   const apiKey = p.apiKey || process.env.WEREAD_API_KEY;
@@ -510,6 +554,7 @@ createServer(async (req, res) => {
   try {
     if (req.method === "POST" && url.pathname === "/api/weread") return weread(req, res);
     if (req.method === "GET" && url.pathname === "/api/local-data") return loadLocalData(req, res);
+    if (req.method === "POST" && url.pathname === "/api/calendar-month") return calendarMonth(req, res);
     if (req.method === "POST" && url.pathname === "/api/sync-book") return syncBook(req, res);
     if (req.method === "POST" && url.pathname === "/api/book-class") return updateBookClass(req, res);
     if (req.method === "POST" && url.pathname === "/api/recheck-isbn") return recheckIsbn(req, res);

@@ -35,10 +35,13 @@ const notesList = $("#notesList");
 const preferWord = $("#preferWord");
 const monthCalendar = $("#monthCalendar");
 const calendarMonth = $("#calendarMonth");
+const prevMonthButton = $("#prevMonth");
+const nextMonthButton = $("#nextMonth");
 let books = [];
 let selectedBook = null;
 let notebookMap = new Map();
 let monthStats = null;
+let calendarState = null;
 let currentRating = Number(ratingInput.value);
 todayStamp.textContent = "今天 " + new Date().toLocaleString("zh-CN", {hour12:false});
 const storedKey = sessionStorage.getItem("weread_api_key");
@@ -314,8 +317,32 @@ function monthInfoFromStats(data) {
   const d = new Date(base * 1000);
   return {year:d.getUTCFullYear(), month:d.getUTCMonth()};
 }
+function monthBaseTime(year, month) { return Math.floor(Date.UTC(year, month, 1) / 1000); }
+async function shiftCalendarMonth(delta) {
+  const base = calendarState || monthInfoFromStats(monthStats || {});
+  const target = new Date(Date.UTC(base.year, base.month + delta, 1));
+  const key = apiKey();
+  if (!key) { setStatus("切换月份需要先填 API Key。", "error"); return; }
+  prevMonthButton.disabled = true;
+  nextMonthButton.disabled = true;
+  setStatus("正在读取月历...");
+  try {
+    const response = await fetch("/api/calendar-month", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({apiKey:key, baseTime:Math.floor(target.getTime() / 1000)})});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "月历读取失败");
+    monthStats = data;
+    renderMonthCalendar(data);
+    setStatus("月历已更新。");
+  } catch (error) {
+    setStatus(error.message, "error");
+  } finally {
+    prevMonthButton.disabled = false;
+    nextMonthButton.disabled = false;
+  }
+}
 function renderMonthCalendar(data = {}) {
   const {year, month} = monthInfoFromStats(data);
+  calendarState = {year, month};
   calendarMonth.textContent = year + " 年 " + String(month + 1).padStart(2, "0") + " 月";
   const readTimes = new Map(Object.entries(data.readTimes || {}).map(([ts, seconds]) => [dateKeyFromTs(ts), Number(seconds || 0)]));
   const calendarBooks = new Map((data.calendar?.days || []).map(day => [day.date, day]));
@@ -573,5 +600,7 @@ syncBookButton.addEventListener("click", syncSelectedBook);
 lookupIsbnButton.addEventListener("click", lookupSelectedIsbn);
 exportNotesButton.addEventListener("click", exportMarkdownNotes);
 loadShelfButton.addEventListener("click", loadShelf); exportButton.addEventListener("click", exportSelected); filterInput.addEventListener("input", renderList);
+prevMonthButton.addEventListener("click", () => shiftCalendarMonth(-1));
+nextMonthButton.addEventListener("click", () => shiftCalendarMonth(1));
 
 loadLocalDataOnOpen();
