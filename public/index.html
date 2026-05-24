@@ -20,7 +20,7 @@
       <label class="field"><span>API Key</span><input id="apiKey" type="password" autocomplete="off" placeholder="wrk-xxxxxxxx"></label>
       <a class="button" href="https://weread.qq.com/r/weread-skills" target="_blank" rel="noreferrer">获取 Key</a>
       <button id="loadShelf" class="button primary" type="button">同步数据</button>
-      <label class="rating-field"><span>星级</span><input id="ratingInput" type="range" min="0" max="5" step="0.5" value="4"><strong id="ratingValue">4.0</strong></label><label class="class-field"><span>类型</span><select id="bookClassSelect"><option value="publication">出版物</option><option value="document">个人文档</option></select></label><button id="lookupIsbn" class="button" type="button" disabled>补 ISBN</button><button id="exportPng" class="button" type="button" disabled>下载票据</button>
+      <label class="rating-field"><span>星级</span><input id="ratingInput" type="range" min="0" max="5" step="0.5" value="4"><strong id="ratingValue">4.0</strong></label><label class="class-field"><span>类型</span><select id="bookClassSelect"><option value="publication">出版物</option><option value="document">个人文档</option></select></label><button id="syncBook" class="button" type="button" disabled>同步本书</button><button id="lookupIsbn" class="button" type="button" disabled>补 ISBN</button><button id="exportPng" class="button" type="button" disabled>下载票据</button>
       <button id="exportNotes" class="button" type="button">导出笔记</button>
     </div>
   </section>
@@ -53,6 +53,11 @@
       <div class="panel-head"><h2>笔记最多</h2><span id="notesScope">全部</span></div>
       <div id="notesList" class="rank-list empty-text">同步后显示</div>
     </article>
+  </section>
+
+  <section class="calendar-panel">
+    <div class="panel-head"><h2>阅历月视图</h2><span id="calendarMonth">--</span></div>
+    <div id="monthCalendar" class="month-calendar empty-text">同步后显示</div>
   </section>
 
   <section class="workspace">

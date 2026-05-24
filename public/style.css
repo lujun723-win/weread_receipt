@@ -7,3 +7,14 @@
 .stars{margin-top:10px;font-size:42px;line-height:1}.hatch{bottom:204px}.hatch.left{left:62px}.hatch.right{right:62px}
 .receipt{width:min(500px,100%);min-height:0}
 @media(max-width:720px){.receipt{width:min(430px,100%);min-height:0}}
+.calendar-panel{margin:0 0 20px;padding:18px;border:1px solid rgba(25,23,19,.12);border-radius:8px;background:linear-gradient(135deg,rgba(255,253,247,.92),rgba(237,231,220,.82));box-shadow:0 18px 42px rgba(42,35,25,.10)}
+.month-calendar{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px}
+.cal-week{color:#746b5f;font-size:12px;font-weight:900;text-align:center}
+.cal-cell{position:relative;min-height:92px;border:1px solid rgba(25,23,19,.10);border-radius:8px;background:rgba(255,255,255,.42);overflow:hidden;padding:8px;display:grid;align-content:space-between}
+.cal-cell.read{background:linear-gradient(145deg,#fffdf7,#ece3d6);box-shadow:inset 0 0 0 1px rgba(255,255,255,.54),0 10px 22px rgba(42,35,25,.08)}
+.cal-cell.empty{border:0;background:transparent;box-shadow:none}
+.cal-day{position:relative;z-index:2;color:#302b25;font-size:13px;font-weight:900}
+.cal-cover{width:42px;height:52px;object-fit:cover;border-radius:10px;box-shadow:0 8px 16px rgba(20,18,14,.20);justify-self:center;align-self:center}
+.cal-cover.ghost{background:linear-gradient(135deg,#d7cfc2,#f5efe5);box-shadow:none}
+.cal-time{position:relative;z-index:2;min-height:14px;color:#1f6f5b;font-size:11px;font-weight:900;text-align:right;font-variant-numeric:tabular-nums}
+@media(max-width:720px){.month-calendar{gap:6px}.cal-cell{min-height:74px;padding:6px}.cal-cover{width:32px;height:40px;border-radius:8px}.cal-time{font-size:10px}}

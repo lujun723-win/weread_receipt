@@ -3,6 +3,7 @@ const apiKeyInput = $("#apiKey");
 const loadShelfButton = $("#loadShelf");
 const exportButton = $("#exportPng");
 const bookClassSelect = $("#bookClassSelect");
+const syncBookButton = $("#syncBook");
 const lookupIsbnButton = $("#lookupIsbn");
 const exportNotesButton = $("#exportNotes");
 const exportResult = $("#exportResult");
@@ -32,6 +33,8 @@ const longestList = $("#longestList");
 const categoryBars = $("#categoryBars");
 const notesList = $("#notesList");
 const preferWord = $("#preferWord");
+const monthCalendar = $("#monthCalendar");
+const calendarMonth = $("#calendarMonth");
 let books = [];
 let selectedBook = null;
 let notebookMap = new Map();
@@ -98,6 +101,7 @@ function applySyncData(data) {
   books = (data.books || []).sort((a,b) => lastReadOf(b) - lastReadOf(a));
   selectedBook = null;
   renderLongest(data.monthly);
+  renderMonthCalendar(data.monthly);
   renderList();
   renderReceipt();
   if (books.length) selectBook(books[0].bookId);
@@ -147,6 +151,32 @@ async function lookupSelectedIsbn() {
   } catch (error) {
     setStatus(error.message, "error");
   } finally {
+    lookupIsbnButton.disabled = !selectedBook || classOf(selectedBook) === "document";
+  }
+}
+
+async function syncSelectedBook() {
+  const key = apiKey();
+  if (!key) { setStatus("先填 API Key。", "error"); return; }
+  if (!selectedBook) return;
+  sessionStorage.setItem("weread_api_key", key);
+  syncBookButton.disabled = true;
+  lookupIsbnButton.disabled = true;
+  setStatus("正在同步本书...");
+  try {
+    const response = await fetch("/api/sync-book", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({apiKey:key, bookId:selectedBook.bookId})});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "单本同步失败");
+    books = (data.books || books.map(book => String(book.bookId) === String(data.book.bookId) ? data.book : book)).sort((a,b) => lastReadOf(b) - lastReadOf(a));
+    selectedBook = data.book;
+    renderList();
+    selectBook(data.book.bookId);
+    metaText.textContent = "本书已更新：阅读时间、已读天数、笔记和 ISBN。";
+    setStatus("本书同步完成。");
+  } catch (error) {
+    setStatus(error.message, "error");
+  } finally {
+    syncBookButton.disabled = !selectedBook;
     lookupIsbnButton.disabled = !selectedBook || classOf(selectedBook) === "document";
   }
 }
@@ -277,6 +307,35 @@ function renderNotes(items) {
     return '<div class="rank-item"><div class="rank-no">' + (index + 1) + '</div><div><div class="rank-title">' + escapeHtml(book.title || "未命名") + '</div><div class="rank-sub">划线 ' + Number(item.noteCount || 0) + ' / 想法 ' + Number(item.reviewCount || 0) + '</div></div><div class="rank-value">' + totalNotes(item) + '</div></div>';
   }).join("");
 }
+function dateKeyFromTs(ts) { const d = new Date(Number(ts) * 1000); return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10); }
+function monthInfoFromStats(data) {
+  const keys = Object.keys(data?.readTimes || {}).map(Number).filter(Boolean).sort((a,b) => a - b);
+  const base = Number(data?.baseTime || keys[0] || Date.now() / 1000);
+  const d = new Date(base * 1000);
+  return {year:d.getUTCFullYear(), month:d.getUTCMonth()};
+}
+function renderMonthCalendar(data = {}) {
+  const {year, month} = monthInfoFromStats(data);
+  calendarMonth.textContent = year + " 年 " + String(month + 1).padStart(2, "0") + " 月";
+  const readTimes = new Map(Object.entries(data.readTimes || {}).map(([ts, seconds]) => [dateKeyFromTs(ts), Number(seconds || 0)]));
+  const calendarBooks = new Map((data.calendar?.days || []).map(day => [day.date, day]));
+  const first = new Date(Date.UTC(year, month, 1));
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const leading = first.getUTCDay();
+  const cells = [];
+  for (let i = 0; i < leading; i += 1) cells.push('<div class="cal-cell empty"></div>');
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const date = year + "-" + String(month + 1).padStart(2, "0") + "-" + String(day).padStart(2, "0");
+    const seconds = readTimes.get(date) || calendarBooks.get(date)?.readTime || 0;
+    const book = calendarBooks.get(date)?.book;
+    const img = book?.cover ? '<img class="cal-cover" alt="' + escapeHtml(book.title) + '" src="' + proxiedImage(book.cover) + '">' : '<div class="cal-cover ghost"></div>';
+    const cls = "cal-cell" + (seconds ? " read" : "");
+    const title = book ? escapeHtml(book.title) : (seconds ? "有阅读记录" : "无阅读");
+    cells.push('<div class="' + cls + '" title="' + title + '"><div class="cal-day">' + day + '</div>' + (seconds ? img : '') + '<div class="cal-time">' + (seconds ? formatDuration(seconds, true) : "") + '</div></div>');
+  }
+  monthCalendar.className = "month-calendar";
+  monthCalendar.innerHTML = '<div class="cal-week">日</div><div class="cal-week">一</div><div class="cal-week">二</div><div class="cal-week">三</div><div class="cal-week">四</div><div class="cal-week">五</div><div class="cal-week">六</div>' + cells.join("");
+}
 function proxiedImage(url) { return "/api/image?url=" + encodeURIComponent(url || ""); }
 function renderList() {
   const keyword = filterInput.value.trim().toLowerCase();
@@ -293,7 +352,7 @@ function renderList() {
     row.append(img, info, progress); return row;
   }));
 }
-function selectBook(bookId) { selectedBook = books.find(book => book.bookId === bookId) || null; if (selectedBook) bookClassSelect.value = classOf(selectedBook); renderList(); renderReceipt(); exportButton.disabled = !selectedBook; lookupIsbnButton.disabled = !selectedBook || classOf(selectedBook) === "document"; }
+function selectBook(bookId) { selectedBook = books.find(book => book.bookId === bookId) || null; if (selectedBook) bookClassSelect.value = classOf(selectedBook); renderList(); renderReceipt(); exportButton.disabled = !selectedBook; syncBookButton.disabled = !selectedBook; lookupIsbnButton.disabled = !selectedBook || classOf(selectedBook) === "document"; }
 function escapeHtml(value) { return String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c])); }
 function isbn13FromBook(book) {
   const raw = String(book.isbn || (book.info && book.info.isbn) || "").replace(/[^0-9Xx]/g, "");
@@ -510,6 +569,7 @@ function drawCanvasTabs(ctx, state, x, y, w, h) {
 
 ratingInput.addEventListener("input", () => { currentRating = Number(ratingInput.value); ratingValue.textContent = currentRating.toFixed(1); renderReceipt(); });
 bookClassSelect.addEventListener("change", saveSelectedClass);
+syncBookButton.addEventListener("click", syncSelectedBook);
 lookupIsbnButton.addEventListener("click", lookupSelectedIsbn);
 exportNotesButton.addEventListener("click", exportMarkdownNotes);
 loadShelfButton.addEventListener("click", loadShelf); exportButton.addEventListener("click", exportSelected); filterInput.addEventListener("input", renderList);

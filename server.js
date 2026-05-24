@@ -43,6 +43,10 @@ function firstValidIsbn(text) {
   }
   return "";
 }
+const SEARCH_HEADERS = {
+  "User-Agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36",
+  "Accept-Language":"zh-CN,zh;q=0.9,en;q=0.7"
+};
 function lastReadOf(book) { return Number(book?.progress?.book?.updateTime || book?.shelf?.readUpdateTime || book?.shelf?.updateTime || 0); }
 async function readJson(file, fallback) { try { return JSON.parse(await readFile(file, "utf8")); } catch { return fallback; } }
 async function writeJson(file, value) { await writeFile(file, JSON.stringify(value, null, 2), "utf8"); }
@@ -100,6 +104,11 @@ async function loadAllMineReviews(apiKey, bookId) {
   }
   return all;
 }
+async function fetchText(url) {
+  const response = await fetch(url, {headers:SEARCH_HEADERS}).catch(() => null);
+  if (!response?.ok) return "";
+  return response.text().catch(() => "");
+}
 async function findIsbnOnline(book) {
   const title = book?.info?.title || book?.shelf?.title || book?.notebook?.book?.title || "";
   const author = book?.info?.author || book?.shelf?.author || book?.notebook?.book?.author || "";
@@ -129,12 +138,12 @@ async function findIsbnOnline(book) {
         }
       }
     }
-    const doubanSearch = await fetch("https://www.douban.com/search?cat=1001&q=" + encodeURIComponent(query), {headers:{"User-Agent":"Mozilla/5.0"}}).catch(() => null);
+    const doubanSearch = await fetch("https://www.douban.com/search?cat=1001&q=" + encodeURIComponent(query), {headers:SEARCH_HEADERS}).catch(() => null);
     if (doubanSearch?.ok) {
       const html = await doubanSearch.text();
       const links = [...html.matchAll(/https:\/\/book\.douban\.com\/subject\/\d+\//g)].map(match => match[0]);
       for (const link of [...new Set(links)].slice(0, 3)) {
-        const page = await fetch(link, {headers:{"User-Agent":"Mozilla/5.0"}}).catch(() => null);
+        const page = await fetch(link, {headers:SEARCH_HEADERS}).catch(() => null);
         if (!page?.ok) continue;
         const subject = await page.text();
         const subjectTitle = subject.match(/property="v:itemreviewed">([^<]+)/)?.[1] || subject.match(/<title>\s*([^<(]+)/)?.[1] || "";
@@ -143,11 +152,56 @@ async function findIsbnOnline(book) {
         if (isbn) return {isbn, source:"douban"};
       }
     }
+    const baikeHtml = await fetchText("https://baike.baidu.com/item/" + encodeURIComponent(title));
+    if (baikeHtml && sameTitle(title, baikeHtml.match(/<title>([^<]+)/)?.[1] || title)) {
+      const isbn = firstValidIsbn(baikeHtml.match(/ISBN[\s\S]{0,140}/i)?.[0] || "");
+      if (isbn) return {isbn, source:"baidu-baike"};
+    }
+    const jdSearch = await fetchText("https://search.jd.com/Search?keyword=" + encodeURIComponent(query) + "&enc=utf-8");
+    if (jdSearch) {
+      const links = [...jdSearch.matchAll(/\/\/item\.jd\.com\/\d+\.html/g)].map(match => "https:" + match[0]);
+      for (const link of [...new Set(links)].slice(0, 3)) {
+        const page = await fetchText(link);
+        if (!page || !sameTitle(title, page.match(/<title>([^<]+)/)?.[1] || "")) continue;
+        const isbn = firstValidIsbn(page.match(/ISBN[\s\S]{0,160}/i)?.[0] || page);
+        if (isbn) return {isbn, source:"jd"};
+      }
+    }
   }
   return {isbn:"", source:""};
 }
+function calendarDateKey(ts) {
+  const date = new Date(Number(ts) * 1000);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+}
+function topBookFromReadData(data) {
+  const item = Array.isArray(data?.readLongest) ? data.readLongest.find(entry => entry?.book || entry?.albumInfo) : null;
+  return item?.book || item?.albumInfo || null;
+}
+async function enrichMonthlyCalendar(apiKey, monthly) {
+  const readTimes = monthly?.readTimes || {};
+  const days = [];
+  for (const [ts, seconds] of Object.entries(readTimes).sort((a,b) => Number(a[0]) - Number(b[0]))) {
+    const date = calendarDateKey(ts);
+    if (!date) continue;
+    const day = {date, timestamp:Number(ts), readTime:Number(seconds || 0), book:null};
+    if (day.readTime > 0) {
+      const daily = await callWeread(apiKey, {api_name:"/readdata/detail", mode:"daily", baseTime:Number(ts)}).catch(error => ({calendarError:error.message}));
+      const book = topBookFromReadData(daily);
+      if (book) day.book = {bookId:book.bookId, title:book.title || book.name || "未命名", author:book.author || book.authorName || "", cover:book.cover || ""};
+      if (daily.calendarError) day.error = daily.calendarError;
+    }
+    days.push(day);
+  }
+  return Object.assign({}, monthly, {calendar:{generatedAt:new Date().toISOString(), days}});
+}
 function bookSyncKey(shelfItem, notebookItem) {
   return JSON.stringify({readUpdateTime:shelfItem.readUpdateTime || 0, updateTime:shelfItem.updateTime || 0, finishReading:shelfItem.finishReading || 0, sort:notebookItem?.sort || 0, reviewCount:notebookItem?.reviewCount || 0, noteCount:notebookItem?.noteCount || 0, bookmarkCount:notebookItem?.bookmarkCount || 0});
+}
+async function writeIndex(records) {
+  const sorted = records.slice().sort((a,b) => lastReadOf(b) - lastReadOf(a));
+  await writeJson(join(DATA_DIR, "index.json"), {updatedAt:new Date().toISOString(), books:sorted.map(book => ({bookId:book.bookId,title:book.shelf?.title,author:book.shelf?.author,lastRead:lastReadOf(book),isbn:book.isbn || "",isbnSource:book.isbnSource || "",bookClass:book.bookClass || "publication"}))});
+  return sorted;
 }
 function sendProgress(res, event) {
   res.write(JSON.stringify(event) + "\n");
@@ -162,12 +216,14 @@ async function syncLocalStream(req, res) {
   try {
     await ensureStore();
     emit("读取书架和统计", 5, "正在请求微信读书官方接口");
-    const [shelf, monthly, annually, notebooks] = await Promise.all([
+    let [shelf, monthly, annually, notebooks] = await Promise.all([
       callWeread(apiKey, {api_name:"/shelf/sync"}),
       callWeread(apiKey, {api_name:"/readdata/detail", mode:"monthly"}),
       callWeread(apiKey, {api_name:"/readdata/detail", mode:"annually"}),
       loadAllNotebooks(apiKey)
     ]);
+    emit("生成月历", 10, "按阅读日读取当天读得最久的书");
+    monthly = await enrichMonthlyCalendar(apiKey, monthly);
     emit("保存基础数据", 12, "书架、统计、笔记索引写入本地");
     await writeJson(join(DATA_DIR, "shelf.json"), shelf);
     await writeJson(join(DATA_DIR, "notebooks.json"), notebooks);
@@ -217,8 +273,7 @@ async function syncLocalStream(req, res) {
       results.push(record);
     }
     emit("生成索引", 94, "按最近阅读时间排序");
-    results.sort((a,b) => lastReadOf(b) - lastReadOf(a));
-    await writeJson(join(DATA_DIR, "index.json"), {updatedAt:new Date().toISOString(), books:results.map(book => ({bookId:book.bookId,title:book.shelf?.title,author:book.shelf?.author,lastRead:lastReadOf(book),isbn:book.isbn || "",bookClass:book.bookClass || "publication"}))});
+    await writeIndex(results);
     emit("完成", 100, "更新 " + sync.updated + " 本，复用 " + sync.reused + " 本");
     sendProgress(res, {type:"done", data:{shelf, monthly, annually, notebooks, books:results, sync}});
     res.end();
@@ -233,12 +288,13 @@ async function syncLocal(req, res) {
   if (!apiKey) { json(res, 400, {error:"缺少 API Key。"}); return; }
   try {
     await ensureStore();
-    const [shelf, monthly, annually, notebooks] = await Promise.all([
+    let [shelf, monthly, annually, notebooks] = await Promise.all([
       callWeread(apiKey, {api_name:"/shelf/sync"}),
       callWeread(apiKey, {api_name:"/readdata/detail", mode:"monthly"}),
       callWeread(apiKey, {api_name:"/readdata/detail", mode:"annually"}),
       loadAllNotebooks(apiKey)
     ]);
+    monthly = await enrichMonthlyCalendar(apiKey, monthly);
     await writeJson(join(DATA_DIR, "shelf.json"), shelf);
     await writeJson(join(DATA_DIR, "notebooks.json"), notebooks);
     await writeJson(join(DATA_DIR, "stats", "monthly.json"), monthly);
@@ -280,8 +336,7 @@ async function syncLocal(req, res) {
       await writeJson(file, record);
       results.push(record);
     }
-    results.sort((a,b) => lastReadOf(b) - lastReadOf(a));
-    await writeJson(join(DATA_DIR, "index.json"), {updatedAt:new Date().toISOString(), books:results.map(book => ({bookId:book.bookId,title:book.shelf?.title,author:book.shelf?.author,lastRead:lastReadOf(book),isbn:book.isbn || "",bookClass:book.bookClass || "publication"}))});
+    await writeIndex(results);
     json(res, 200, {shelf, monthly, annually, notebooks, books:results, sync});
   } catch (error) {
     json(res, 502, {error:error.message});
@@ -326,6 +381,58 @@ async function loadLocalData(req, res) {
     }
     books.sort((a,b) => lastReadOf(b) - lastReadOf(a));
     json(res, 200, {empty:false,dataDir:DATA_DIR,shelf:await readJson(join(DATA_DIR,"shelf.json"),{books:[],albums:[]}),monthly:await readJson(join(DATA_DIR,"stats","monthly.json"),{}),annually:await readJson(join(DATA_DIR,"stats","annually.json"),{}),notebooks:await readJson(join(DATA_DIR,"notebooks.json"),{books:[]}),books,sync:{updated:0,reused:books.length,isbnEnriched:0,isbnMissing:0,dataDir:DATA_DIR}});
+  } catch (error) { json(res, 502, {error:error.message}); }
+}
+async function syncBook(req, res) {
+  let p; try { p = JSON.parse(await body(req)); } catch { json(res, 400, {error:"请求体不是有效 JSON。"}); return; }
+  const apiKey = p.apiKey || process.env.WEREAD_API_KEY;
+  const bookId = String(p.bookId || "");
+  if (!apiKey) { json(res, 400, {error:"缺少 API Key。"}); return; }
+  if (!bookId) { json(res, 400, {error:"缺少 bookId。"}); return; }
+  try {
+    await ensureStore();
+    const file = join(DATA_DIR, "books", safeId(bookId) + ".json");
+    const existing = await readJson(file, null);
+    if (!existing) { json(res, 404, {error:"本地没有这本书，请先同步书架。"}); return; }
+    const [shelf, notebooks, progress, info] = await Promise.all([
+      callWeread(apiKey, {api_name:"/shelf/sync"}),
+      loadAllNotebooks(apiKey),
+      callWeread(apiKey, {api_name:"/book/getprogress", bookId}),
+      callWeread(apiKey, {api_name:"/book/info", bookId})
+    ]);
+    await writeJson(join(DATA_DIR, "shelf.json"), shelf);
+    await writeJson(join(DATA_DIR, "notebooks.json"), notebooks);
+    const shelfItem = (shelf.books || []).find(item => String(item.bookId) === bookId) || existing.shelf || {bookId};
+    const notebook = (notebooks.books || []).find(item => String(item.bookId || item.book?.bookId) === bookId) || existing.notebook || null;
+    let bookmarks = existing.bookmarks || {updated:[], chapters:[]};
+    let reviews = existing.reviews || [];
+    if (notebook) {
+      [bookmarks, reviews] = await Promise.all([
+        callWeread(apiKey, {api_name:"/book/bookmarklist", bookId}),
+        loadAllMineReviews(apiKey, bookId)
+      ]);
+    }
+    const bookClass = existing.bookClass || "publication";
+    const record = {bookId, bookClass, shelf:shelfItem, notebook, progress, info, bookmarks, reviews, syncKey:bookSyncKey(shelfItem, notebook), notebookCounts:notebook ? {reviewCount:notebook.reviewCount,noteCount:notebook.noteCount,bookmarkCount:notebook.bookmarkCount,sort:notebook.sort} : null, updatedAt:new Date().toISOString(), isbn:normalizeIsbn(info.isbn || existing.isbn), isbnSource:normalizeIsbn(info.isbn) ? "weread" : existing.isbnSource || ""};
+    let isbnEnriched = 0;
+    let isbnMissing = 0;
+    if (record.bookClass !== "document" && !normalizeIsbn(record.isbn)) {
+      const found = await findIsbnOnline(record);
+      if (found.isbn) { record.isbn = found.isbn; record.isbnSource = found.source; isbnEnriched = 1; }
+      else isbnMissing = 1;
+    }
+    await writeJson(file, record);
+    const index = await readJson(join(DATA_DIR, "index.json"), {books:[]});
+    const records = [];
+    const seen = new Set([bookId]);
+    records.push(record);
+    for (const entry of index.books || []) {
+      if (seen.has(String(entry.bookId))) continue;
+      const other = await readJson(join(DATA_DIR, "books", safeId(entry.bookId) + ".json"), null);
+      if (other) records.push(other);
+    }
+    const books = await writeIndex(records);
+    json(res, 200, {book:record, books, sync:{updated:1,reused:Math.max(0, books.length - 1),isbnEnriched,isbnMissing,dataDir:DATA_DIR}});
   } catch (error) { json(res, 502, {error:error.message}); }
 }
 async function updateBookClass(req, res) {
@@ -402,6 +509,7 @@ createServer(async (req, res) => {
   try {
     if (req.method === "POST" && url.pathname === "/api/weread") return weread(req, res);
     if (req.method === "GET" && url.pathname === "/api/local-data") return loadLocalData(req, res);
+    if (req.method === "POST" && url.pathname === "/api/sync-book") return syncBook(req, res);
     if (req.method === "POST" && url.pathname === "/api/book-class") return updateBookClass(req, res);
     if (req.method === "POST" && url.pathname === "/api/recheck-isbn") return recheckIsbn(req, res);
     if (req.method === "POST" && url.pathname === "/api/sync-local-stream") return syncLocalStream(req, res);
