@@ -351,7 +351,11 @@ function renderNotes(items) {
     return '<div class="rank-item"><div class="rank-no">' + (index + 1) + '</div><div><div class="rank-title">' + escapeHtml(book.title || "未命名") + '</div><div class="rank-sub">划线 ' + Number(item.noteCount || 0) + ' / 想法 ' + Number(item.reviewCount || 0) + '</div></div><div class="rank-value">' + totalNotes(item) + '</div></div>';
   }).join("");
 }
-function dateKeyFromTs(ts) { const d = new Date(Number(ts) * 1000); return Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10); }
+function dateKeyFromTs(ts) {
+  const d = new Date(Number(ts) * 1000);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+}
 function monthInfoFromStats(data) {
   const keys = Object.keys(data?.readTimes || {}).map(Number).filter(Boolean).sort((a,b) => a - b);
   const base = Number(data?.baseTime || keys[0] || Date.now() / 1000);

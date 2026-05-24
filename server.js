@@ -173,7 +173,8 @@ async function findIsbnOnline(book) {
 }
 function calendarDateKey(ts) {
   const date = new Date(Number(ts) * 1000);
-  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0") + "-" + String(date.getDate()).padStart(2, "0");
 }
 function monthKeyFromBaseTime(baseTime) {
   const date = new Date(Number(baseTime) * 1000);
@@ -183,47 +184,39 @@ function compactBookInfo(book) {
   if (!book || typeof book !== "object" || !book.cover || !(book.bookId || book.title || book.name)) return null;
   return {bookId:book.bookId || "", title:book.title || book.name || "未命名", author:book.author || book.authorName || "", cover:book.cover || ""};
 }
-function findCoveredBook(value, seen = new Set()) {
-  if (!value || typeof value !== "object" || seen.has(value)) return null;
-  seen.add(value);
-  const direct = compactBookInfo(value);
-  if (direct) return direct;
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const found = findCoveredBook(item, seen);
-      if (found) return found;
-    }
-    return null;
+function datedBooksFromMonthly(monthly) {
+  const dated = new Map();
+  for (const item of monthly?.preferBooks || []) {
+    const match = String(item.reason || "").match(/(20\d{2})[/-](\d{1,2})[/-](\d{1,2})/);
+    const book = compactBookInfo(item.bookInfo);
+    if (match && book) dated.set(match[1] + "-" + match[2].padStart(2, "0") + "-" + match[3].padStart(2, "0"), book);
   }
-  for (const key of ["book", "bookInfo", "albumInfo", "bookDetail"]) {
-    const found = findCoveredBook(value[key], seen);
-    if (found) return found;
-  }
-  for (const item of Object.values(value)) {
-    const found = findCoveredBook(item, seen);
-    if (found) return found;
-  }
-  return null;
+  return dated;
 }
-function topBookFromReadData(data) {
-  const item = Array.isArray(data?.readLongest) ? data.readLongest.find(entry => entry?.book || entry?.albumInfo) : null;
-  return compactBookInfo(item?.book || item?.albumInfo) || findCoveredBook(data);
+function exactReadTimeBooksFromMonthly(monthly) {
+  const byTime = new Map();
+  for (const item of monthly?.readLongest || []) {
+    const readTime = Number(item.readTime || 0);
+    const book = compactBookInfo(item.book || item.albumInfo);
+    if (!readTime || !book) continue;
+    byTime.set(readTime, byTime.has(readTime) ? null : book);
+  }
+  return byTime;
 }
-async function enrichMonthlyCalendar(apiKey, monthly) {
+async function enrichMonthlyCalendar(monthly) {
   const base = new Date(Number(monthly?.baseTime || Date.now() / 1000) * 1000);
   const year = base.getFullYear();
   const month = base.getMonth() + 1;
   const readTimes = monthly?.readTimes || {};
+  const datedBooks = datedBooksFromMonthly(monthly);
+  const exactTimeBooks = exactReadTimeBooksFromMonthly(monthly);
   const days = [];
   for (const [ts, seconds] of Object.entries(readTimes).sort((a,b) => Number(a[0]) - Number(b[0]))) {
     const date = calendarDateKey(ts);
     if (!date) continue;
     const day = {date, timestamp:Number(ts), readTime:Number(seconds || 0), book:null};
     if (day.readTime > 0) {
-      const daily = await callWeread(apiKey, {api_name:"/readdata/detail", mode:"daily", baseTime:Number(ts)}).catch(error => ({calendarError:error.message}));
-      const book = topBookFromReadData(daily);
-      if (book) day.book = book;
-      if (daily.calendarError) day.error = daily.calendarError;
+      day.book = datedBooks.get(date) || exactTimeBooks.get(day.readTime) || null;
     }
     days.push(day);
   }
@@ -256,8 +249,8 @@ async function syncLocalStream(req, res) {
       callWeread(apiKey, {api_name:"/readdata/detail", mode:"annually"}),
       loadAllNotebooks(apiKey)
     ]);
-    emit("生成月历", 10, "按阅读日读取当天读得最久的书");
-    monthly = await enrichMonthlyCalendar(apiKey, monthly);
+    emit("生成月历", 10, "按月度统计生成阅读日历");
+    monthly = await enrichMonthlyCalendar(monthly);
     emit("保存基础数据", 12, "书架、统计、笔记索引写入本地");
     await writeJson(join(DATA_DIR, "shelf.json"), shelf);
     await writeJson(join(DATA_DIR, "notebooks.json"), notebooks);
@@ -328,7 +321,7 @@ async function syncLocal(req, res) {
       callWeread(apiKey, {api_name:"/readdata/detail", mode:"annually"}),
       loadAllNotebooks(apiKey)
     ]);
-    monthly = await enrichMonthlyCalendar(apiKey, monthly);
+    monthly = await enrichMonthlyCalendar(monthly);
     await writeJson(join(DATA_DIR, "shelf.json"), shelf);
     await writeJson(join(DATA_DIR, "notebooks.json"), notebooks);
     await writeJson(join(DATA_DIR, "stats", "monthly.json"), monthly);
@@ -428,7 +421,7 @@ async function calendarMonth(req, res) {
   try {
     await ensureStore();
     const monthly = await callWeread(apiKey, {api_name:"/readdata/detail", mode:"monthly", baseTime});
-    const enriched = await enrichMonthlyCalendar(apiKey, monthly);
+    const enriched = await enrichMonthlyCalendar(monthly);
     await writeJson(join(DATA_DIR, "stats", "monthly-" + monthKeyFromBaseTime(baseTime) + ".json"), enriched);
     json(res, 200, enriched);
   } catch (error) { json(res, 502, {error:error.message}); }
