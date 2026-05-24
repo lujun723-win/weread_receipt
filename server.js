@@ -178,7 +178,8 @@ function calendarDateKey(ts) {
 }
 function monthKeyFromBaseTime(baseTime) {
   const date = new Date(Number(baseTime) * 1000);
-  return Number.isNaN(date.getTime()) ? "unknown" : date.toISOString().slice(0, 7);
+  if (Number.isNaN(date.getTime())) return "unknown";
+  return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0");
 }
 function compactBookInfo(book) {
   if (!book || typeof book !== "object" || !book.cover || !(book.bookId || book.title || book.name)) return null;
@@ -210,8 +211,9 @@ async function enrichMonthlyCalendar(monthly) {
   const readTimes = monthly?.readTimes || {};
   const datedBooks = datedBooksFromMonthly(monthly);
   const exactTimeBooks = exactReadTimeBooksFromMonthly(monthly);
+  const monthBook = compactBookInfo(monthly?.readLongest?.[0]?.book || monthly?.readLongest?.[0]?.albumInfo);
   const days = [];
-  let currentBook = null;
+  let currentBook = datedBooks.size ? null : monthBook;
   for (const [ts, seconds] of Object.entries(readTimes).sort((a,b) => Number(a[0]) - Number(b[0]))) {
     const date = calendarDateKey(ts);
     if (!date) continue;

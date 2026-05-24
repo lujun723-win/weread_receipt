@@ -394,9 +394,9 @@ function renderMonthCalendar(data = {}) {
   calendarMonth.textContent = year + " 年 " + String(month + 1).padStart(2, "0") + " 月";
   const readTimes = new Map(Object.entries(data.readTimes || {}).map(([ts, seconds]) => [dateKeyFromTs(ts), Number(seconds || 0)]));
   const calendarBooks = new Map((data.calendar?.days || []).map(day => [day.date, day]));
-  const first = new Date(Date.UTC(year, month, 1));
-  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
-  const leading = first.getUTCDay();
+  const first = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const leading = first.getDay();
   const cells = [];
   for (let i = 0; i < leading; i += 1) cells.push('<div class="cal-cell empty"></div>');
   for (let day = 1; day <= daysInMonth; day += 1) {
