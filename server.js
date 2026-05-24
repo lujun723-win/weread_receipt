@@ -211,12 +211,15 @@ async function enrichMonthlyCalendar(monthly) {
   const datedBooks = datedBooksFromMonthly(monthly);
   const exactTimeBooks = exactReadTimeBooksFromMonthly(monthly);
   const days = [];
+  let currentBook = null;
   for (const [ts, seconds] of Object.entries(readTimes).sort((a,b) => Number(a[0]) - Number(b[0]))) {
     const date = calendarDateKey(ts);
     if (!date) continue;
     const day = {date, timestamp:Number(ts), readTime:Number(seconds || 0), book:null};
     if (day.readTime > 0) {
-      day.book = datedBooks.get(date) || exactTimeBooks.get(day.readTime) || null;
+      const explicitBook = datedBooks.get(date) || exactTimeBooks.get(day.readTime) || null;
+      if (explicitBook) currentBook = explicitBook;
+      day.book = currentBook;
     }
     days.push(day);
   }
