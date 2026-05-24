@@ -356,19 +356,22 @@ function monthInfoFromStats(data) {
   const keys = Object.keys(data?.readTimes || {}).map(Number).filter(Boolean).sort((a,b) => a - b);
   const base = Number(data?.baseTime || keys[0] || Date.now() / 1000);
   const d = new Date(base * 1000);
-  return {year:d.getUTCFullYear(), month:d.getUTCMonth()};
+  return {year:d.getFullYear(), month:d.getMonth()};
 }
-function monthBaseTime(year, month) { return Math.floor(Date.UTC(year, month, 1) / 1000); }
+function monthBaseTime(year, month) { return Math.floor(new Date(year, month, 1).getTime() / 1000); }
 async function shiftCalendarMonth(delta) {
   const base = calendarState || monthInfoFromStats(monthStats || {});
-  const target = new Date(Date.UTC(base.year, base.month + delta, 1));
+  const targetYear = base.year + Math.floor((base.month + delta) / 12);
+  const targetMonth = ((base.month + delta) % 12 + 12) % 12;
   const key = apiKey();
   if (!key) { setStatus("切换月份需要先填 API Key。", "error"); return; }
   prevMonthButton.disabled = true;
   nextMonthButton.disabled = true;
   setStatus("正在读取月历...");
   try {
-    const response = await fetch("/api/calendar-month", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({apiKey:key, baseTime:Math.floor(target.getTime() / 1000)})});
+    calendarState = {year:targetYear, month:targetMonth};
+    calendarMonth.textContent = targetYear + " 年 " + String(targetMonth + 1).padStart(2, "0") + " 月";
+    const response = await fetch("/api/calendar-month", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({apiKey:key, year:targetYear, month:targetMonth + 1, baseTime:monthBaseTime(targetYear, targetMonth)})});
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "月历读取失败");
     monthStats = data;
@@ -382,7 +385,7 @@ async function shiftCalendarMonth(delta) {
   }
 }
 function renderMonthCalendar(data = {}) {
-  const {year, month} = monthInfoFromStats(data);
+  const {year, month} = data.calendar?.year ? {year:data.calendar.year, month:data.calendar.month - 1} : monthInfoFromStats(data);
   calendarState = {year, month};
   calendarMonth.textContent = year + " 年 " + String(month + 1).padStart(2, "0") + " 月";
   const readTimes = new Map(Object.entries(data.readTimes || {}).map(([ts, seconds]) => [dateKeyFromTs(ts), Number(seconds || 0)]));

@@ -210,6 +210,9 @@ function topBookFromReadData(data) {
   return compactBookInfo(item?.book || item?.albumInfo) || findCoveredBook(data);
 }
 async function enrichMonthlyCalendar(apiKey, monthly) {
+  const base = new Date(Number(monthly?.baseTime || Date.now() / 1000) * 1000);
+  const year = base.getFullYear();
+  const month = base.getMonth() + 1;
   const readTimes = monthly?.readTimes || {};
   const days = [];
   for (const [ts, seconds] of Object.entries(readTimes).sort((a,b) => Number(a[0]) - Number(b[0]))) {
@@ -224,7 +227,7 @@ async function enrichMonthlyCalendar(apiKey, monthly) {
     }
     days.push(day);
   }
-  return Object.assign({}, monthly, {calendar:{generatedAt:new Date().toISOString(), days}});
+  return Object.assign({}, monthly, {calendar:{generatedAt:new Date().toISOString(), year, month, days}});
 }
 function bookSyncKey(shelfItem, notebookItem) {
   return JSON.stringify({readUpdateTime:shelfItem.readUpdateTime || 0, updateTime:shelfItem.updateTime || 0, finishReading:shelfItem.finishReading || 0, sort:notebookItem?.sort || 0, reviewCount:notebookItem?.reviewCount || 0, noteCount:notebookItem?.noteCount || 0, bookmarkCount:notebookItem?.bookmarkCount || 0});
@@ -417,7 +420,9 @@ async function loadLocalData(req, res) {
 async function calendarMonth(req, res) {
   let p; try { p = JSON.parse(await body(req)); } catch { json(res, 400, {error:"请求体不是有效 JSON。"}); return; }
   const apiKey = p.apiKey || process.env.WEREAD_API_KEY;
-  const baseTime = Number(p.baseTime || 0);
+  const year = Number(p.year || 0);
+  const month = Number(p.month || 0);
+  const baseTime = year && month ? Math.floor(new Date(year, month - 1, 1).getTime() / 1000) : Number(p.baseTime || 0);
   if (!apiKey) { json(res, 400, {error:"缺少 API Key。"}); return; }
   if (!baseTime) { json(res, 400, {error:"缺少月份。"}); return; }
   try {
